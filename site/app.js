@@ -61,6 +61,7 @@ function makeCard(article, index, section) {
     const list = el('ul','summary');
     article.bullets.forEach(text => list.append(el('li','',text)));
     card.append(list);
+    card.append(el('p','summary-model',`AI 요약 · ${article.summaryModel || currentEdition.ai?.model || '모델 기록 없음'}`));
   } else {
     const missing = el('p','summary-missing');
     missing.append(el('strong','','본문 요약 없음'), document.createTextNode(`${summaryReason(article)} 원문에서 내용을 확인할 수 있습니다.`));

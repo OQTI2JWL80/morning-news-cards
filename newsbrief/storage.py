@@ -26,7 +26,7 @@ def validate_edition(edition):
         raise ValueError("Invalid section list")
     ids, cities = set(), set()
     counts = {s["id"]: 0 for s in SECTIONS}
-    allowed = {"id", "title", "section", "city", "publishedAt", "sources", "bullets", "summaryStatus", "classification"}
+    allowed = {"id", "title", "section", "city", "publishedAt", "sources", "bullets", "summaryStatus", "classification", "summaryModel"}
     for article in articles:
         if set(article) - allowed:
             raise ValueError("Unexpected or private article field")
@@ -46,6 +46,9 @@ def validate_edition(edition):
         if not article.get("sources") or any(not public_url(s["url"]) for s in article["sources"]):
             raise ValueError("Invalid source")
         bullets = article.get("bullets", [])
+        summary_model = article.get("summaryModel")
+        if summary_model is not None and (not isinstance(summary_model, str) or not re.fullmatch(r"gemini-[a-z0-9.-]{1,80}", summary_model) or article["summaryStatus"] != "summarized"):
+            raise ValueError("Invalid summary model")
         if article["summaryStatus"] == "summarized":
             if len(bullets) != 3 or any(not isinstance(b, str) or not 20 <= len(b) <= 130 for b in bullets):
                 raise ValueError("Invalid summary")

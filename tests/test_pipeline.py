@@ -145,6 +145,41 @@ class SummaryTests(unittest.TestCase):
             self.assertIsNone(client.request("s",[],{}))
             self.assertEqual(fetch.call_count,1)
             self.assertEqual(client.reason,"quota_exceeded")
+            self.assertEqual(client.model_index, 0)
+
+    def test_fallback_model_is_recorded_on_verified_summary(self):
+        client = Gemini(key='test', confirmed=True, interval=0)
+        data = article(); data['body'] = self.body
+        result = {'items': [{'id': data['id'], 'bullets': self.valid()}]}
+        reply = json.dumps({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': json.dumps(result)}]}}]}).encode()
+        with patch('newsbrief.ai.fetch', side_effect=[FetchError('503'), (reply, {})]) as api:
+            client.summarize([data])
+        self.assertIn('gemini-3.7-flash:generateContent', api.call_args_list[0].args[0])
+        self.assertIn('gemini-3.5-flash-lite:generateContent', api.call_args_list[1].args[0])
+        self.assertEqual(data['summaryModel'], 'gemini-3.5-flash-lite')
+        public = public_article(data, client.reason)
+        self.assertEqual(public['summaryModel'], data['summaryModel'])
+        self.assertEqual(make_edition(CUTOFF, [data], [{'status': 'ok'}], client)['ai']['summaryModels'], ['gemini-3.5-flash-lite'])
+
+    def test_fallback_chain_and_sticky_success_with_shared_budget(self):
+        client = Gemini(key='test', confirmed=True, interval=0, max_calls=4)
+        reply = json.dumps({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': '{"items":[]}'}]}}]}).encode()
+        with patch('newsbrief.ai.fetch', side_effect=[FetchError('503'), FetchError('503'), (reply, {}), (reply, {})]) as api:
+            self.assertIsNotNone(client.request('s', [], {}))
+            self.assertIsNotNone(client.request('s', [], {}))
+            self.assertIsNone(client.request('s', [], {}))
+        self.assertEqual(client.attempted_models, list(client.models))
+        self.assertTrue(all('gemini-3.1-flash-lite:generateContent' in call.args[0] for call in api.call_args_list[2:]))
+        self.assertEqual(client.calls, 4)
+        self.assertEqual(client.reason, 'request_limit')
+
+    def test_credentials_or_invalid_request_never_switch_model(self):
+        for code in ['400', '401', '403', '404']:
+            client = Gemini(key='test', confirmed=True, interval=0)
+            with patch('newsbrief.ai.fetch', side_effect=FetchError(code)) as api:
+                self.assertIsNone(client.request('s', [], {}))
+                self.assertEqual(api.call_count, 1)
+                self.assertEqual(client.model_index, 0)
 
     def test_transient_model_error_recovers_within_call_budget(self):
         client = Gemini(key='test', confirmed=True, interval=0)

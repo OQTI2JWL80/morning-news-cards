@@ -31,8 +31,14 @@ export async function makeImage(article,section,edition,wrap,index) {
     y+=18;
   }
   ctx.textBaseline='alphabetic';ctx.fillStyle='#607084';ctx.font=`500 17px ${font}`;
-  let publisher=article.sources[0].name;while(ctx.measureText(publisher).width>590) publisher=publisher.slice(0,-2)+'…';
+  const sourceWidth=article.summaryStatus === 'summarized' ? 260 : 590;
+  let publisher=article.sources[0].name;while(ctx.measureText(publisher).width>sourceWidth) publisher=publisher.slice(0,-2)+'…';
   ctx.fillText(publisher,48,832);
+  if (article.summaryStatus === 'summarized') {
+    ctx.textAlign='right';ctx.font=`400 14px ${font}`;
+    ctx.fillText(`AI 요약 · ${article.summaryModel || edition.ai?.model || '모델 기록 없음'}`,672,832);
+    ctx.textAlign='left';
+  }
   ctx.font=`400 14px ${font}`;ctx.fillText('Google 뉴스 기반 · AI 요약은 원문과 함께 확인하세요.',48,865);
   let result;
   for (const quality of [.88,.8,.7,.6]) {
@@ -43,4 +49,3 @@ export async function makeImage(article,section,edition,wrap,index) {
   // Never reduce font size to meet the byte target. Preserve legibility instead.
   return result;
 }
-

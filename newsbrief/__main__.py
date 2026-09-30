@@ -38,6 +38,7 @@ def public_article(article, reason):
         "publishedAt": article["publishedAt"], "sources": sources,
         "bullets": article.get("bullets", []) if status == "summarized" else [],
         "summaryStatus": status, "classification": article.get("classification", "rss"),
+        "summaryModel": article.get("summaryModel") if status == "summarized" else None,
     }
 
 
@@ -52,7 +53,9 @@ def make_edition(cutoff, selected, feed_reports, ai):
         "sections": [{**s, "available": counts[s["id"]]} for s in SECTIONS],
         "articles": articles, "summaryCount": summaries,
         "collection": {"feedsOk": sum(f["status"] == "ok" for f in feed_reports), "feedsTotal": len(feed_reports), "candidateWindowHours": 24},
-        "ai": {"model": MODEL, "calls": ai.calls, "status": ai.reason or "ok"},
+        "ai": {"model": MODEL, "calls": ai.calls, "status": ai.reason or "ok",
+               "attemptedModels": ai.attempted_models,
+               "summaryModels": sorted({a["summaryModel"] for a in articles if a.get("summaryModel")})},
     })
 
 
@@ -94,6 +97,7 @@ def main():
     if ai.last_error:
         print(f"AI 응답 진단: {ai.last_error}", flush=True)
     edition = make_edition(cutoff, selected, reports, ai)
+    print(f"AI 호출 모델: {', '.join(ai.attempted_models) or '없음'} / 검증된 요약: {edition['summaryCount']}개 / 요약 모델: {', '.join(edition['ai']['summaryModels']) or '없음'}", flush=True)
     previous = load_previous(args.archive, args.previous_url)
     old = previous.get(edition["date"])
     # A degraded rerun must not replace a more complete same-day edition.
