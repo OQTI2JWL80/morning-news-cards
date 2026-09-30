@@ -171,6 +171,19 @@ class SummaryTests(unittest.TestCase):
             client.summarize([data])
             request.assert_not_called()
 
+    def test_congested_summary_downgrades_once_within_budget(self):
+        client = Gemini(key='test', confirmed=True, interval=0, max_calls=4)
+        data = [article(str(i)) for i in range(4)]
+        for item in data: item['body'] = self.body
+        result = {'items': [{'id': data[0]['id'], 'bullets': self.valid()}]}
+        reply = json.dumps({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': json.dumps(result)}]}}]}).encode()
+        with patch('newsbrief.ai.fetch', side_effect=[FetchError('503'), FetchError('503'), FetchError('503'), (reply, {})]) as api:
+            client.summarize(data)
+            sizes = [len(json.loads(json.loads(call.kwargs['data'])['contents'][0]['parts'][0]['text'])) for call in api.call_args_list]
+            self.assertEqual(sizes, [4, 4, 4, 1])
+            self.assertEqual(data[0]['summaryStatus'], 'summarized')
+            self.assertEqual(client.calls, 4)
+
     def test_private_body_and_evidence_never_published(self):
         data=article();data.update(body=self.body,evidence="secret snippet",originalUrl="https://example.com/a")
         public=public_article(data,"key_missing")

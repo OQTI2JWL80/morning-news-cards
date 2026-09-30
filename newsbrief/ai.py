@@ -104,11 +104,17 @@ class Gemini:
         }}}, "required": ["items"]}
         ready = [a for a in articles if a.get("body")]
         by_id = {a["id"]: a for a in ready}
-        for offset in range(0, len(ready), 1):
+        offset, batch_size = 0, 4
+        while offset < len(ready):
             if self.reason:
                 break
-            payload = [{"id": a["id"], "title": a["title"], "body": a["body"]} for a in ready[offset:offset+1]]
+            payload = [{"id": a["id"], "title": a["title"], "body": a["body"]} for a in ready[offset:offset+batch_size]]
             result = self.request(SUMMARY_SYSTEM, payload, schema)
+            if self.reason == "ai_unavailable" and batch_size > 1 and self.calls < self.max_calls:
+                # One downgrade per summary phase; never reset a quota failure.
+                self.reason, batch_size = None, 1
+                continue
+            offset += batch_size
             if not result or not isinstance(result.get("items"), list):
                 continue
             batch_ids = {p["id"] for p in payload}
