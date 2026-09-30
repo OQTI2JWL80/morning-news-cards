@@ -158,6 +158,19 @@ class SummaryTests(unittest.TestCase):
             self.assertIsNone(client.request('s', [], {}))
             self.assertEqual(api.call_count, 2)
 
+    def test_summary_phase_recovers_after_transient_classification_failure(self):
+        for reason, expected in [("ai_unavailable", 1), ("quota_exceeded", 0), ("key_invalid", 0)]:
+            client = Gemini(key='test', confirmed=True, interval=0)
+            client.reason, client.calls = reason, 3
+            data = article(); data['body'] = self.body
+            with patch.object(client, 'request', return_value={'items': []}) as request:
+                client.summarize([data])
+                self.assertEqual(request.call_count, expected)
+        client.reason, client.calls = 'ai_unavailable', client.max_calls
+        with patch.object(client, 'request') as request:
+            client.summarize([data])
+            request.assert_not_called()
+
     def test_private_body_and_evidence_never_published(self):
         data=article();data.update(body=self.body,evidence="secret snippet",originalUrl="https://example.com/a")
         public=public_article(data,"key_missing")

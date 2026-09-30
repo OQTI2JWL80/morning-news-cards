@@ -93,6 +93,10 @@ class Gemini:
         return answers
 
     def summarize(self, articles):
+        # A transient classification outage need not block the later content phase.
+        # Credentials, quota failures and the shared daily call budget still stop it.
+        if self.reason == "ai_unavailable" and self.calls < self.max_calls:
+            self.reason = None
         schema = {"type": "OBJECT", "properties": {"items": {"type": "ARRAY", "items": {
             "type": "OBJECT", "properties": {"id": {"type": "STRING"}, "bullets": {"type": "ARRAY", "items": {
                 "type": "OBJECT", "properties": {"text": {"type": "STRING"}, "evidence": {"type": "STRING"}}, "required": ["text", "evidence"],
