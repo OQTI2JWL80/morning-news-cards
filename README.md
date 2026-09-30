@@ -24,7 +24,7 @@ GitHub Actions + GitHub Pages + Gemini API Free Tier를 사용합니다. **사�
 - 분야: 종합 3개 + 국내/해외 사회·경제·과학기술·엔터 각 3개 + 건강 3개 + 서울·고양·파주 각 1개.
 - Google News RSS의 검색·토픽 후보에 출처 확인, 스팸 제외, 분야 분류, 동일 사건 중복 제거를 적용합니다. 종합에 포함된 사건은 다른 분야에 반복하지 않습니다.
 - 허용한 매체 도메인은 `newsbrief/config.py`의 `TRUSTED_DOMAINS`에 있습니다. 검색 결과에 섞인 광고성/해킹된 사이트를 줄이기 위한 목록입니다. 유효한 소스가 부족해도 임의의 사이트나 오래된 기사를 넣지 않습니다.
-- AI 연결이 있으면 제목을 최대 30개씩 분류하고, 읽을 수 있는 기사 본문은 최대 4개씩 묶어 요약하고, 서버 혼잡 시 한 번만 1개씩 요청하는 방식으로 전환합니다. 기본 모델은 `gemini-3.7-flash`입니다. 서버 오류(500/502/503/504) 시 같은 키로 `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` 순서로 전환하며, 성공한 모델을 남은 요청에도 유지합니다. 다음 실행은 다시 기본 모델부터 시작합니다. 모든 모델과 재시도를 합쳐 최대 12회 호출합니다. 429 한도 초과·키 오류·잘못된 요청·모델 미지원은 모델 전환으로 우회하지 않습니다. 유료 Google Search grounding, 유료 Batch API는 사용하지 않습니다. 각 카드와 WebP 이미지에 실제 요약 모델을 표시하며 날짜별 JSON에 `summaryModel`, `attemptedModels`, `summaryModels`를 기록합니다. 무료 제공 모델 목록은 `newsbrief/config.py`의 `FALLBACK_MODELS`에서 관리합니다.
+- AI 연결이 있으면 제목을 최대 30개씩 분류하고, 읽을 수 있는 기사 본문은 최대 4개씩 묶어 요약하고, 서버 혼잡 시 한 번만 1개씩 요청하는 방식으로 전환합니다. 기본 모델은 `gemini-3.7-flash`입니다. 서버 오류(500/502/503/504) 시 같은 키로 `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` 순서로 전환하며, 성공한 모델을 남은 요청에도 유지합니다. 다음 실행은 다시 기본 모델부터 시작합니다. 모든 모델과 재시도를 합쳐 최대 12회 호출합니다. 429 한도 초과·키 오류·잘못된 요청·모델 미지원은 모델 전환으로 우회하지 않습니다. 유료 Google Search grounding, 유료 Batch API는 사용하지 않습니다. 각 카드와 WebP 이미지에 실제 요약 모델을 표시하며 날짜별 JSON에 `summaryModel`, `attemptedModels`, `summaryModels`를 기록합니다. 무료 제공 모델 목록은 `newsbrief/config.py`의 `FALLBACK_MODELS`에서 관리합니다.
 - 요약 문장마다 원문에 실제 존재하는 근거를 요구합니다. 새로운 수치, 근거 누락, 잘못된 JSON, 부족한 본문은 요약에서 제외합니다. 이것이 완전한 사실 검증을 보장하지는 않으므로 원문 링크를 함께 제공합니다.
 - 07시 이후 수정 시각이 확인된 본문, 유료/로그인 제한 문서, robots 규칙이 허용하지 않는 문서는 요약하지 않습니다. 접근 제한을 우회하지 않습니다.
 - AI 키 미등록, 무료 확인 미설정, 429 한도 초과, 모델 미지원이면 제목·출처·원문으로 계속 제공합니다. 분야가 불명확하면 부족한 수를 표시합니다.
@@ -92,3 +92,9 @@ python -m venv .venv
 - [Gemini 모델 가격](https://ai.google.dev/gemini-api/docs/pricing)
 - [GitHub Actions 무료 이용](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 - [예약 지연·비활동 중지 조건](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+
+## 본문 접근과 요약 탈락 원인
+
+대표 기사 본문 확보에 실패하면 동일 사건으로 직접 판별된 관련 기사 최대 2개도 확인합니다. 모든 대체 기사는 동일한 24시간 집계 범위에 있어야 합니다. 성공하면 제목·발행 시각·출처·원문 링크를 실제 읽은 기사에 맞춥니다. 다른 사건의 내용이나 여러 기사의 본문을 섞지 않습니다. 사이트의 ‘본문 확인 과정’에서 기사별 접근 결과를 볼 수 있습니다. JSON에는 본문 없이 이름·URL·상태만 기록합니다.
+
+원문 링크 해석 실패, robots 허용 확인 실패, 서버 연결 실패, 짧은 본문, 추출 실패, 접근 제한, 07시 이후 수정은 각각 구분합니다. AI 요약도 기사 누락, 응답 미완성, 부족한 근거, 문장 수·길이·형식 불일치, 본문 근거 불일치, 숫자 불일치, 중복 문장을 구분합니다. 이전 보관판의 포괄적인 실패 상태에서 세부 원인을 추정하지 않습니다.

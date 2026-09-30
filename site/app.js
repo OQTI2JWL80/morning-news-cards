@@ -48,6 +48,16 @@ function summaryReason(article) {
     summary_unverified:'본문에 근거한 요약을 충분히 확인하지 못했습니다.', invalid_response:'요약 결과를 충분히 확인하지 못했습니다.',
     key_invalid:'AI 요약 연결을 확인하고 있습니다.', request_limit:'오늘의 요약 처리량에 도달했습니다.',
     ai_unavailable:'AI 요약을 일시적으로 사용할 수 없습니다.',
+    link_unresolved:'구글 뉴스 링크에서 원문 주소를 확인하지 못했습니다.',
+    robots_blocked:'언론사의 자동 수집 허용 여부를 확인하지 못했거나 수집이 제한됐습니다.',
+    fetch_failed:'원문 서버 연결에 실패했습니다.', extractor_unavailable:'본문 추출 도구를 사용할 수 없습니다.',
+    body_too_short:'읽을 수 있는 본문이 너무 짧습니다.', body_parse_failed:'원문에서 기사 본문을 추출하지 못했습니다.',
+    summary_missing:'AI 응답에 이 기사의 요약이 누락됐습니다.', summary_response_incomplete:'AI 응답이 완성되지 않았습니다.',
+    summary_insufficient_evidence:'AI가 본문에서 충분한 요약 근거를 찾지 못했습니다.',
+    summary_sentence_count:'요약 문장 수가 기준과 맞지 않았습니다.', summary_format_invalid:'요약 형식이 기준과 맞지 않았습니다.',
+    summary_length_invalid:'요약 문장 또는 근거의 길이가 기준과 맞지 않았습니다.',
+    summary_evidence_mismatch:'요약 근거가 실제 본문과 일치하지 않았습니다.',
+    summary_number_mismatch:'요약의 숫자를 해당 근거에서 확인하지 못했습니다.', summary_duplicate:'요약 문장이 중복됐습니다.',
   };
   return reasons[article.summaryStatus] || '기사 본문을 충분히 확인하지 못했습니다.';
 }
@@ -83,6 +93,20 @@ function makeCard(article, index, section) {
   save.append(icon('save'),document.createTextNode('이미지 저장'));
   save.addEventListener('click', () => downloadCard(article, section, index, save));
   actions.append(link,save); bottom.append(line,actions);
+  if (article.bodyAttempts?.length) {
+    const details = el('details','access-details');
+    details.append(el('summary','',`본문 확인 과정 · ${article.bodyAttempts.length}개 기사`));
+    const history = el('ul');
+    article.bodyAttempts.forEach(attempt => {
+      const item = el('li');
+      const href = safeUrl(attempt.url);
+      const source = el(href ? 'a' : 'span','',attempt.name);
+      if (href) {source.href=href;source.target='_blank';source.rel='noopener noreferrer';}
+      item.append(source,document.createTextNode(` · ${attempt.status === 'ready' ? '본문 확인 완료' : summaryReason({summaryStatus:attempt.status})}`));
+      history.append(item);
+    });
+    details.append(history);bottom.append(details);
+  }
   if (article.sources.length > 1) {
     const related = el('p','related','함께 보도 ');
     article.sources.slice(1).forEach(source => {

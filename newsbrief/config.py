@@ -2,7 +2,8 @@ from datetime import timedelta, timezone
 
 KST = timezone(timedelta(hours=9), "Asia/Seoul")
 MODEL = "gemini-3.7-flash"
-FALLBACK_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash",
+                   "gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
 RETENTION_DAYS = 30
 EDITORIAL_VERSION = 4
 # Curated publisher roots limit search-result spam. Extend deliberately in source control.

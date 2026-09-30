@@ -10,3 +10,5 @@
 
 
 .summary-model{margin:0 0 18px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.top-section .news-card:first-child .summary-model{color:#adc4d8}
+
+.access-details{margin-top:10px;color:var(--muted);font-size:11px;line-height:1.7;overflow-wrap:anywhere}.access-details summary{cursor:pointer}.access-details ul{padding-left:17px}.top-section .news-card:first-child .access-details{color:#adc4d8}

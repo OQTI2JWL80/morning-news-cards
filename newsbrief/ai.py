@@ -47,11 +47,11 @@ class Gemini:
                                  "thinkingConfig": {"thinkingLevel": "LOW"},
                                  "responseMimeType": "application/json", "responseSchema": schema},
         }).encode()
-        for attempt in range(3):
+        for attempt in range(len(self.models)):
             if self.calls >= self.max_calls:
                 self.reason = "request_limit"
                 return None
-            delay = self.interval * (2 ** attempt) - (time.monotonic() - self.last_call)
+            delay = self.interval * (2 ** min(attempt, 2)) - (time.monotonic() - self.last_call)
             if delay > 0:
                 time.sleep(delay)
             self.calls += 1
@@ -75,10 +75,12 @@ class Gemini:
                 return None
             except FetchError as exc:
                 self.last_error = f"{exc.code}: {exc.detail}" if exc.detail else exc.code
-                if exc.code in {"500", "502", "503", "504", "network"} and attempt < 2 and self.calls < self.max_calls:
-                    if exc.code != "network" and self.model_index < len(self.models) - 1:
+                if exc.code in {"500", "502", "503", "504", "network"} and self.calls < self.max_calls:
+                    if exc.code != "network" and self.model_index < len(self.models) - 1 and attempt < len(self.models) - 1:
                         self.model_index += 1
-                    continue
+                        continue
+                    if attempt < 2:
+                        continue
                 self.reason = {"429": "quota_exceeded", "401": "key_invalid", "403": "key_invalid", "404": "model_unavailable"}.get(exc.code, "ai_unavailable")
                 return None
             except (ValueError, KeyError, TypeError, IndexError):
@@ -128,35 +130,50 @@ class Gemini:
                 continue
             offset += batch_size
             if not result or not isinstance(result.get("items"), list):
+                if not self.reason:
+                    for p in payload:
+                        by_id[p['id']]['summaryStatus'] = 'summary_response_incomplete'
                 continue
             batch_ids = {p["id"] for p in payload}
+            for p in payload:
+                by_id[p['id']]['summaryStatus'] = 'summary_missing'
             seen = set()
             for answer in result["items"]:
                 if not isinstance(answer, dict) or answer.get("id") not in batch_ids or answer["id"] in seen:
                     continue
                 seen.add(answer["id"])
                 article = by_id[answer["id"]]
-                bullets = validate_summary(answer.get("bullets"), article["body"])
+                diagnostics = {}
+                bullets = validate_summary(answer.get("bullets"), article["body"], diagnostics=diagnostics)
+                article['summaryStatus'] = diagnostics.get('reason', 'summary_unverified')
                 if bullets:
                     article.update(bullets=bullets, summaryStatus="summarized", summaryModel=self.last_success_model)
 
 
-def validate_summary(bullets, body):
-    if not isinstance(bullets, list) or len(bullets) != 3:
+def validate_summary(bullets, body, diagnostics=None):
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics['reason'] = reason
         return []
+    if bullets == []:
+        return reject('summary_insufficient_evidence')
+    if not isinstance(bullets, list) or len(bullets) != 3:
+        return reject('summary_sentence_count')
     normalized_body = re.sub(r"\s+", "", body)
     texts = []
     for bullet in bullets:
         if not isinstance(bullet, dict):
-            return []
+            return reject('summary_format_invalid')
         text, evidence = bullet.get("text"), bullet.get("evidence")
         if not isinstance(text, str) or not isinstance(evidence, str) or not 20 <= len(text) <= 130 or not 20 <= len(evidence) <= 350:
-            return []
-        if re.sub(r"\s+", "", evidence) not in normalized_body or re.search(r"https?://|<[^>]+>", text):
-            return []
+            return reject('summary_length_invalid')
+        if re.sub(r"\s+", "", evidence) not in normalized_body:
+            return reject('summary_evidence_mismatch')
+        if re.search(r"https?://|<[^>]+>", text):
+            return reject('summary_format_invalid')
         # A new number, even in an otherwise well-formed response, is a failed summary.
         numbers = re.findall(r"\d+(?:[.,]\d+)*", text)
         if any(number.replace(",", "") not in evidence.replace(",", "") for number in numbers):
-            return []
+            return reject('summary_number_mismatch')
         texts.append(text.strip())
-    return texts if len(set(texts)) == 3 else []
+    return texts if len(set(texts)) == 3 else reject('summary_duplicate')

@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from newsbrief.ai import Gemini, validate_summary
 from newsbrief.config import KST, SECTIONS
+from newsbrief.content import enrich
 from newsbrief.editorial import apply_classification, choose_articles, fallback_classify, same_event, trusted_candidate
 from newsbrief.feeds import edition_cutoff, parse_feed
 from newsbrief.net import FetchError, fetch, public_url
@@ -116,6 +117,43 @@ class EditorialTests(unittest.TestCase):
         self.assertFalse(trusted_candidate(item))
 
 
+class BodyAccessTests(unittest.TestCase):
+    def test_same_event_alternative_has_its_own_headline_source_and_time(self):
+        primary = article('a', title='한국은행 기준금리 동결 발표')
+        other = article('b', title='한국은행 기준금리 동결 발표')
+        other.update(publisher='다른언론', publishedAt=(CUTOFF-timedelta(hours=2)).isoformat())
+        primary['related'] = [other]
+        with patch('newsbrief.content.resolve_urls', return_value={primary['url']:primary['url'], other['url']:other['url']}), patch('newsbrief.content.robots_allowed', return_value=True), patch('newsbrief.content.fetch', side_effect=[FetchError('403'), (b'body',other['url'])]), patch('newsbrief.content.extract_article', return_value=('확인된 본문', 'ready')):
+            enriched = enrich([primary], CUTOFF)[0]
+        self.assertEqual(enriched['publisher'], '다른언론')
+        self.assertEqual(enriched['publishedAt'], other['publishedAt'])
+        self.assertEqual(enriched['originalUrl'], other['url'])
+        self.assertEqual([a['status'] for a in enriched['bodyAttempts']], ['fetch_failed', 'ready'])
+        self.assertEqual(enriched['related'][0]['publisher'], '테스트언론')
+        public = public_article(enriched, None)
+        self.assertEqual(public['sources'][0]['url'], other['url'])
+        self.assertNotIn('body', public)
+        validate_edition(make_edition(CUTOFF, [enriched], [{'status':'ok'}], Gemini(key='')))
+
+    def test_alternatives_must_match_event_and_cutoff(self):
+        primary = article('a')
+        unrelated = article('b', title='서울시 시민 공원 개방 계획')
+        late = article('c'); late['publishedAt'] = (CUTOFF+timedelta(seconds=1)).isoformat()
+        primary['related'] = [unrelated, late]
+        with patch('newsbrief.content.resolve_urls', return_value={}) as resolve:
+            enriched = enrich([primary], CUTOFF)[0]
+        self.assertEqual(len(resolve.call_args.args[0]), 1)
+        self.assertEqual(enriched['summaryStatus'], 'link_unresolved')
+        self.assertEqual(len(enriched['bodyAttempts']), 1)
+
+    def test_robots_restriction_does_not_trigger_content_request(self):
+        primary = article()
+        with patch('newsbrief.content.resolve_urls', return_value={primary['url']:primary['url']}), patch('newsbrief.content.robots_allowed', return_value=False), patch('newsbrief.content.fetch') as request:
+            enriched = enrich([primary], CUTOFF)[0]
+        request.assert_not_called()
+        self.assertEqual(enriched['summaryStatus'], 'robots_blocked')
+
+
 class SummaryTests(unittest.TestCase):
     body = "서울시는 시민들을 위한 새 공원을 다음 달에 개방할 계획이라고 밝혔다. 공원에는 어린이들을 위한 놀이 공간과 산책로를 함께 조성했다. 방문객은 별도의 입장료 없이 시설을 자유롭게 이용할 수 있다."
 
@@ -125,6 +163,25 @@ class SummaryTests(unittest.TestCase):
 
     def test_three_grounded_bullets(self):
         self.assertEqual(len(validate_summary(self.valid(),self.body)),3)
+
+    def test_rejection_reason_distinguishes_missing_evidence_numbers_and_length(self):
+        for bullets, reason in [([], 'summary_insufficient_evidence'), ([{}], 'summary_sentence_count')]:
+            diagnostic = {}
+            self.assertEqual(validate_summary(bullets,self.body,diagnostics=diagnostic), [])
+            self.assertEqual(diagnostic['reason'], reason)
+        bullets = self.valid(); bullets[0]['evidence'] = '실제 본문 어디에도 없는 서로 다른 근거 문장입니다.'
+        diagnostic = {}; validate_summary(bullets,self.body,diagnostics=diagnostic)
+        self.assertEqual(diagnostic['reason'], 'summary_evidence_mismatch')
+        bullets = self.valid(); bullets[0]['text'] = '서울시는 시민들을 위한 새 공원 120개를 개방할 계획이라고 밝혔다.'
+        diagnostic = {}; validate_summary(bullets,self.body,diagnostics=diagnostic)
+        self.assertEqual(diagnostic['reason'], 'summary_number_mismatch')
+
+    def test_missing_article_in_ai_response_has_specific_status(self):
+        client = Gemini(key='test', confirmed=True, interval=0)
+        data = article(); data['body'] = self.body
+        with patch.object(client, 'request', return_value={'items': []}):
+            client.summarize([data])
+        self.assertEqual(data['summaryStatus'], 'summary_missing')
 
     def test_invented_evidence_and_number_rejected(self):
         bullets=self.valid();bullets[0]["evidence"]="이것은 제공된 기사 본문에 전혀 없는 근거 문장입니다."
@@ -155,22 +212,23 @@ class SummaryTests(unittest.TestCase):
         with patch('newsbrief.ai.fetch', side_effect=[FetchError('503'), (reply, {})]) as api:
             client.summarize([data])
         self.assertIn('gemini-3.7-flash:generateContent', api.call_args_list[0].args[0])
-        self.assertIn('gemini-3.5-flash-lite:generateContent', api.call_args_list[1].args[0])
-        self.assertEqual(data['summaryModel'], 'gemini-3.5-flash-lite')
+        self.assertIn(client.models[1] + ':generateContent', api.call_args_list[1].args[0])
+        self.assertEqual(data['summaryModel'], client.models[1])
         public = public_article(data, client.reason)
         self.assertEqual(public['summaryModel'], data['summaryModel'])
-        self.assertEqual(make_edition(CUTOFF, [data], [{'status': 'ok'}], client)['ai']['summaryModels'], ['gemini-3.5-flash-lite'])
+        self.assertEqual(make_edition(CUTOFF, [data], [{'status': 'ok'}], client)['ai']['summaryModels'], [client.models[1]])
 
     def test_fallback_chain_and_sticky_success_with_shared_budget(self):
-        client = Gemini(key='test', confirmed=True, interval=0, max_calls=4)
+        client = Gemini(key='test', confirmed=True, interval=0, max_calls=8)
         reply = json.dumps({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': '{"items":[]}'}]}}]}).encode()
-        with patch('newsbrief.ai.fetch', side_effect=[FetchError('503'), FetchError('503'), (reply, {}), (reply, {})]) as api:
+        with patch('newsbrief.ai.fetch', side_effect=[FetchError('503')] * 5 + [(reply, {}), (reply, {}), (reply, {})]) as api:
+            self.assertIsNotNone(client.request('s', [], {}))
             self.assertIsNotNone(client.request('s', [], {}))
             self.assertIsNotNone(client.request('s', [], {}))
             self.assertIsNone(client.request('s', [], {}))
         self.assertEqual(client.attempted_models, list(client.models))
-        self.assertTrue(all('gemini-3.1-flash-lite:generateContent' in call.args[0] for call in api.call_args_list[2:]))
-        self.assertEqual(client.calls, 4)
+        self.assertTrue(all('gemini-3.1-flash-lite:generateContent' in call.args[0] for call in api.call_args_list[5:]))
+        self.assertEqual(client.calls, 8)
         self.assertEqual(client.reason, 'request_limit')
 
     def test_credentials_or_invalid_request_never_switch_model(self):
@@ -207,17 +265,17 @@ class SummaryTests(unittest.TestCase):
             request.assert_not_called()
 
     def test_congested_summary_downgrades_once_within_budget(self):
-        client = Gemini(key='test', confirmed=True, interval=0, max_calls=4)
+        client = Gemini(key='test', confirmed=True, interval=0, max_calls=7)
         data = [article(str(i)) for i in range(4)]
         for item in data: item['body'] = self.body
         result = {'items': [{'id': data[0]['id'], 'bullets': self.valid()}]}
         reply = json.dumps({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': json.dumps(result)}]}}]}).encode()
-        with patch('newsbrief.ai.fetch', side_effect=[FetchError('503'), FetchError('503'), FetchError('503'), (reply, {})]) as api:
+        with patch('newsbrief.ai.fetch', side_effect=[FetchError('503')] * 6 + [(reply, {})]) as api:
             client.summarize(data)
             sizes = [len(json.loads(json.loads(call.kwargs['data'])['contents'][0]['parts'][0]['text'])) for call in api.call_args_list]
-            self.assertEqual(sizes, [4, 4, 4, 1])
+            self.assertEqual(sizes, [4] * 6 + [1])
             self.assertEqual(data[0]['summaryStatus'], 'summarized')
-            self.assertEqual(client.calls, 4)
+            self.assertEqual(client.calls, 7)
 
     def test_private_body_and_evidence_never_published(self):
         data=article();data.update(body=self.body,evidence="secret snippet",originalUrl="https://example.com/a")

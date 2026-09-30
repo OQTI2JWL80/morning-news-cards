@@ -2,7 +2,7 @@
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -10,7 +10,7 @@ from .net import FetchError, USER_AGENT, fetch, public_url
 
 
 def resolve_urls(articles):
-    urls = [a["url"] for a in articles]
+    urls = list(dict.fromkeys(a["url"] for a in articles))
     google = [u for u in urls if urlparse(u).hostname == "news.google.com"]
     resolved = {u: u for u in urls if u not in google and public_url(u)}
     if google:
@@ -63,37 +63,61 @@ def extract_article(raw, final_url, cutoff):
                 return "", "restricted"
         text = extract(raw, url=final_url, include_comments=False, include_tables=False, favor_precision=True) or ""
         if len(text) < 250:
-            return "", "body_unavailable"
+            return "", "body_too_short"
         if re.search(r"구독.{0,10}(필요|전용)|유료\s*회원|로그인.{0,12}(읽|열람)|access denied|verify you are human|just a moment", text, re.I):
             return "", "restricted"
         # Bound input size; never persist raw text, evidence snippets, or HTML.
         return text[:6500], "ready"
     except (ValueError, TypeError):
-        return "", "body_unavailable"
+        return "", "body_parse_failed"
 
 
 def enrich(articles, cutoff):
-    resolved = resolve_urls(articles)
+    # Only already collected reports directly matched to this event are alternatives.
+    # Publication cutoff and event matching are checked again before using a body.
+    from .editorial import same_event
+    def candidates(article):
+        result = [{**article}]
+        for related in article.get('related', [])[:2]:
+            try:
+                stamp = datetime.fromisoformat(related['publishedAt'])
+                if stamp.tzinfo and cutoff - timedelta(days=1) < stamp <= cutoff and same_event(article, related):
+                    result.append(related)
+            except (ValueError, KeyError, TypeError):
+                continue
+        return result
+    resolved = resolve_urls([item for article in articles for item in candidates(article)])
     robots_cache = {}
     for url in dict.fromkeys(resolved.values()):
         robots_allowed(url, robots_cache)
 
     def read(article):
-        target = resolved.get(article["url"])
-        article.update(body="", bullets=[], summaryStatus="body_unavailable", originalUrl=target)
-        if not target or not robots_allowed(target, robots_cache):
-            return article
-        try:
-            raw, final = fetch(target, retries=0, timeout=12)
-            # A redirect must not silently take us into a robots-disallowed document.
-            if not robots_allowed(final, robots_cache):
-                return article
-            article["originalUrl"] = final
-            article["body"], article["summaryStatus"] = extract_article(raw, final, cutoff)
-        except (FetchError, ImportError):
-            pass
+        attempts = candidates(article)
+        article.update(body="", bullets=[], summaryStatus="body_unavailable", originalUrl=None, bodyAttempts=[])
+        for candidate in attempts:
+            target = resolved.get(candidate['url'])
+            final, body, status = target, '', 'link_unresolved'
+            if target:
+                status = 'robots_blocked'
+                if robots_allowed(target, robots_cache):
+                    try:
+                        raw, final = fetch(target, retries=0, timeout=12)
+                        if robots_allowed(final, robots_cache):
+                            body, status = extract_article(raw, final, cutoff)
+                    except FetchError:
+                        status = 'fetch_failed'
+                    except ImportError:
+                        status = 'extractor_unavailable'
+            article['bodyAttempts'].append({'name': candidate['publisher'], 'url': final or candidate['url'], 'status': status})
+            article['summaryStatus'] = status
+            if body:
+                # Keep the headline, publication time and source aligned with the text used.
+                # Related sources never inherit a summary of the inaccessible original.
+                article.update(body=body, originalUrl=final, title=candidate['title'],
+                               publisher=candidate['publisher'], publishedAt=candidate['publishedAt'], url=candidate['url'])
+                article['related'] = [i for i in attempts if i is not candidate][:2]
+                break
         return article
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         return list(pool.map(read, articles))
-

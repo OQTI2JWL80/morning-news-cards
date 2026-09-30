@@ -26,7 +26,7 @@ def validate_edition(edition):
         raise ValueError("Invalid section list")
     ids, cities = set(), set()
     counts = {s["id"]: 0 for s in SECTIONS}
-    allowed = {"id", "title", "section", "city", "publishedAt", "sources", "bullets", "summaryStatus", "classification", "summaryModel"}
+    allowed = {"id", "title", "section", "city", "publishedAt", "sources", "bullets", "summaryStatus", "classification", "summaryModel", "bodyAttempts"}
     for article in articles:
         if set(article) - allowed:
             raise ValueError("Unexpected or private article field")
@@ -47,6 +47,12 @@ def validate_edition(edition):
             raise ValueError("Invalid source")
         bullets = article.get("bullets", [])
         summary_model = article.get("summaryModel")
+        attempts = article.get('bodyAttempts', [])
+        if not isinstance(attempts, list) or len(attempts) > 3:
+            raise ValueError('Invalid body access history')
+        for attempt in attempts:
+            if not isinstance(attempt, dict) or set(attempt) != {'name', 'url', 'status'} or not isinstance(attempt['name'], str) or not public_url(attempt['url']) or attempt['status'] not in {'ready', 'link_unresolved', 'robots_blocked', 'fetch_failed', 'extractor_unavailable', 'body_too_short', 'body_parse_failed', 'body_unavailable', 'restricted', 'updated_after_cutoff'}:
+                raise ValueError('Invalid body access attempt')
         if summary_model is not None and (not isinstance(summary_model, str) or not re.fullmatch(r"gemini-[a-z0-9.-]{1,80}", summary_model) or article["summaryStatus"] != "summarized"):
             raise ValueError("Invalid summary model")
         if article["summaryStatus"] == "summarized":
