@@ -36,31 +36,40 @@ class Gemini:
         if self.reason or self.calls >= self.max_calls:
             self.reason = self.reason or "request_limit"
             return None
-        delay = self.interval - (time.monotonic() - self.last_call)
-        if delay > 0:
-            time.sleep(delay)
         body = json.dumps({
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": json.dumps(data, ensure_ascii=False)}]}],
             "generationConfig": {"temperature": 1.0, "maxOutputTokens": 12000, "responseMimeType": "application/json", "responseSchema": schema},
         }).encode()
-        self.calls += 1
-        self.last_call = time.monotonic()
-        try:
-            raw, _ = fetch(f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
-                           data=body, headers={"Content-Type": "application/json", "x-goog-api-key": self.key},
-                           retries=0, timeout=75, limit=1_000_000)
-            response = json.loads(raw)
-            candidate = response.get("candidates", [{}])[0]
-            if candidate.get("finishReason") != "STOP":
+        for attempt in range(3):
+            if self.calls >= self.max_calls:
+                self.reason = "request_limit"
                 return None
-            result = json.loads("".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []) if not p.get("thought")))
-            return result if isinstance(result, dict) else None
-        except FetchError as exc:
-            self.last_error = f"{exc.code}: {exc.detail}" if exc.detail else exc.code
-            self.reason = {"429": "quota_exceeded", "401": "key_invalid", "403": "key_invalid", "404": "model_unavailable"}.get(exc.code, "ai_unavailable")
-        except (ValueError, KeyError, TypeError, IndexError):
-            self.reason = "invalid_response"
+            delay = self.interval * (2 ** attempt) - (time.monotonic() - self.last_call)
+            if delay > 0:
+                time.sleep(delay)
+            self.calls += 1
+            self.last_call = time.monotonic()
+            try:
+                raw, _ = fetch(f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
+                               data=body, headers={"Content-Type": "application/json", "x-goog-api-key": self.key},
+                               retries=0, timeout=75, limit=1_000_000)
+                response = json.loads(raw)
+                candidate = response.get("candidates", [{}])[0]
+                self.last_error = None
+                if candidate.get("finishReason") != "STOP":
+                    return None
+                result = json.loads("".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []) if not p.get("thought")))
+                return result if isinstance(result, dict) else None
+            except FetchError as exc:
+                self.last_error = f"{exc.code}: {exc.detail}" if exc.detail else exc.code
+                if exc.code in {"500", "502", "503", "504", "network"} and attempt < 2 and self.calls < self.max_calls:
+                    continue
+                self.reason = {"429": "quota_exceeded", "401": "key_invalid", "403": "key_invalid", "404": "model_unavailable"}.get(exc.code, "ai_unavailable")
+                return None
+            except (ValueError, KeyError, TypeError, IndexError):
+                self.reason = "invalid_response"
+                return None
         return None
 
     def classify(self, items):

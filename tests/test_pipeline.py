@@ -146,6 +146,18 @@ class SummaryTests(unittest.TestCase):
             self.assertEqual(fetch.call_count,1)
             self.assertEqual(client.reason,"quota_exceeded")
 
+    def test_transient_model_error_recovers_within_call_budget(self):
+        client = Gemini(key='test', confirmed=True, interval=0)
+        reply = json.dumps({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': '{"items":[]}'}]}}]}).encode()
+        with patch('newsbrief.ai.fetch', side_effect=[FetchError('503'), (reply, {})]):
+            self.assertEqual(client.request('s', [], {}), {'items': []})
+        self.assertEqual(client.calls, 2)
+        self.assertIsNone(client.reason)
+        client = Gemini(key='test', confirmed=True, interval=0, max_calls=2)
+        with patch('newsbrief.ai.fetch', side_effect=FetchError('503')) as api:
+            self.assertIsNone(client.request('s', [], {}))
+            self.assertEqual(api.call_count, 2)
+
     def test_private_body_and_evidence_never_published(self):
         data=article();data.update(body=self.body,evidence="secret snippet",originalUrl="https://example.com/a")
         public=public_article(data,"key_missing")
