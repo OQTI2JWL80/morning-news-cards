@@ -3,7 +3,7 @@
 매일 한국시간 07시까지 발행된 뉴스를 최대 33장의 가벼운 웹카드로 읽습니다.
 GitHub Actions + GitHub Pages + Gemini API Free Tier를 사용합니다. **사용자의 PC가 꺼져 있어도 실행됩니다.**
 
-예정 주소: `https://oqti2jwl80.github.io/morning-news-cards/` (GitHub 게시를 완료해야 열립니다.)
+공개 주소: [아침 일곱 시 뉴스 브리핑](https://oqti2jwl80.github.io/morning-news-cards/)
 
 ## 처음 한 번 설정
 
@@ -24,7 +24,7 @@ GitHub Actions + GitHub Pages + Gemini API Free Tier를 사용합니다. **사�
 - 분야: 종합 3개 + 국내/해외 사회·경제·과학기술·엔터 각 3개 + 건강 3개 + 서울·고양·파주 각 1개.
 - Google News RSS의 검색·토픽 후보에 출처 확인, 스팸 제외, 분야 분류, 동일 사건 중복 제거를 적용합니다. 종합에 포함된 사건은 다른 분야에 반복하지 않습니다.
 - 허용한 매체 도메인은 `newsbrief/config.py`의 `TRUSTED_DOMAINS`에 있습니다. 검색 결과에 섞인 광고성/해킹된 사이트를 줄이기 위한 목록입니다. 유효한 소스가 부족해도 임의의 사이트나 오래된 기사를 넣지 않습니다.
-- AI 연결이 있으면 제목을 최대 60개씩 분류하고, 읽을 수 있는 기사 본문은 최대 6개씩 묶어 요약합니다. 모델은 `gemini-3.8-flash`로 고정하고 최대 12회 호출합니다. 유료 Google Search grounding, 유료 Batch API, 모델 자동 변경은 사용하지 않습니다.
+- AI 연결이 있으면 제목을 최대 60개씩 분류하고, 읽을 수 있는 기사 본문은 최대 6개씩 묶어 요약합니다. 모델은 `gemini-3.7-flash`로 고정하고 재시도를 포함해 최대 12회 호출합니다. 2026-09-30에 3.8 모델의 반복적인 서버 혼잡으로 사용자가 무료 3.7 모델 변경을 선택했습니다. 유료 Google Search grounding, 유료 Batch API, 모델 자동 변경은 사용하지 않습니다.
 - 요약 문장마다 원문에 실제 존재하는 근거를 요구합니다. 새로운 수치, 근거 누락, 잘못된 JSON, 부족한 본문은 요약에서 제외합니다. 이것이 완전한 사실 검증을 보장하지는 않으므로 원문 링크를 함께 제공합니다.
 - 07시 이후 수정 시각이 확인된 본문, 유료/로그인 제한 문서, robots 규칙이 허용하지 않는 문서는 요약하지 않습니다. 접근 제한을 우회하지 않습니다.
 - AI 키 미등록, 무료 확인 미설정, 429 한도 초과, 모델 미지원이면 제목·출처·원문으로 계속 제공합니다. 분야가 불명확하면 부족한 수를 표시합니다.
@@ -92,4 +92,3 @@ python -m venv .venv
 - [Gemini 모델 가격](https://ai.google.dev/gemini-api/docs/pricing)
 - [GitHub Actions 무료 이용](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 - [예약 지연·비활동 중지 조건](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
-

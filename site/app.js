@@ -47,6 +47,7 @@ function summaryReason(article) {
     restricted:'이 기사는 원문에서 직접 확인해 주세요.', model_unavailable:'오늘은 AI 요약을 사용할 수 없습니다.',
     summary_unverified:'본문에 근거한 요약을 충분히 확인하지 못했습니다.', invalid_response:'요약 결과를 충분히 확인하지 못했습니다.',
     key_invalid:'AI 요약 연결을 확인하고 있습니다.', request_limit:'오늘의 요약 처리량에 도달했습니다.',
+    ai_unavailable:'AI 요약을 일시적으로 사용할 수 없습니다.',
   };
   return reasons[article.summaryStatus] || '기사 본문을 충분히 확인하지 못했습니다.';
 }
