@@ -39,7 +39,9 @@ class Gemini:
         body = json.dumps({
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": json.dumps(data, ensure_ascii=False)}]}],
-            "generationConfig": {"temperature": 1.0, "maxOutputTokens": 12000, "responseMimeType": "application/json", "responseSchema": schema},
+            "generationConfig": {"temperature": 1.0, "maxOutputTokens": 12000,
+                                 "thinkingConfig": {"thinkingLevel": "LOW"},
+                                 "responseMimeType": "application/json", "responseSchema": schema},
         }).encode()
         for attempt in range(3):
             if self.calls >= self.max_calls:
@@ -81,10 +83,10 @@ class Gemini:
             }, "required": ["id", "section", "city", "eventKey", "confidence"],
         }}}, "required": ["items"]}
         answers = []
-        for offset in range(0, len(items), 60):
+        for offset in range(0, len(items), 30):
             if self.reason or self.calls >= self.max_calls - 6:
                 break
-            payload = [{"id": i["id"], "title": i["title"]} for i in items[offset:offset+60]]
+            payload = [{"id": i["id"], "title": i["title"]} for i in items[offset:offset+30]]
             result = self.request(CLASSIFY_SYSTEM, payload, schema)
             if result and isinstance(result.get("items"), list):
                 answers.extend(a for a in result["items"] if isinstance(a, dict))
@@ -98,10 +100,10 @@ class Gemini:
         }}}, "required": ["items"]}
         ready = [a for a in articles if a.get("body")]
         by_id = {a["id"]: a for a in ready}
-        for offset in range(0, len(ready), 6):
+        for offset in range(0, len(ready), 4):
             if self.reason:
                 break
-            payload = [{"id": a["id"], "title": a["title"], "body": a["body"]} for a in ready[offset:offset+6]]
+            payload = [{"id": a["id"], "title": a["title"], "body": a["body"]} for a in ready[offset:offset+4]]
             result = self.request(SUMMARY_SYSTEM, payload, schema)
             if not result or not isinstance(result.get("items"), list):
                 continue
