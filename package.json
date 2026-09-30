@@ -1,0 +1,2 @@
+{"name":"morning-news-cards","private":true,"type":"module","scripts":{"check":"node --check site/app.js && node --check site/card-image.js"}}
+

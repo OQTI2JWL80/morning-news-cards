@@ -1,0 +1,110 @@
+name: Morning news cards
+
+on:
+  schedule:
+    - cron: '0 22 * * *' # UTC 22:00 = 다음 날 한국시간 07:00
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/run-record.json'
+      - 'README.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: morning-news-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Check editorial rules and failure handling
+        run: python -m unittest discover -s tests -v
+      - name: Check frontend syntax
+        run: |
+          node --check site/app.js
+          node --check site/card-image.js
+      - name: Discover existing Pages URL
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Collect, summarize, validate, and build
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_FREE_TIER_CONFIRMED: ${{ vars.GEMINI_FREE_TIER_CONFIRMED }}
+          PREVIOUS_URL: ${{ steps.pages.outputs.base_url }}
+        run: python -m newsbrief --previous-url "$PREVIOUS_URL"
+      - name: Verify public output and size
+        run: python scripts/check_build.py build
+      - name: Upload Pages output
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build
+          retention-days: 1
+      - name: Save tiny run record
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-record
+          path: build/run-record.json
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish validated edition
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  record:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          name: run-record
+          path: .github
+      - name: Keep a small publication record
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/run-record.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record published morning edition [skip ci]'
+            git push
+          fi
+      - name: Verify published edition (including first three mornings)
+        env:
+          PAGES_URL: https://oqti2jwl80.github.io/morning-news-cards/
+        run: python scripts/verify_deployment.py "$PAGES_URL"
+      - name: Show rollout checks for the first three mornings
+        run: |
+          echo '### 아침 브리핑 게시 완료' >> "$GITHUB_STEP_SUMMARY"
+          echo '첫 3일은 아래 기록에서 07시 집계·기사 수·요약 수·부분 제공 여부를 확인하세요.' >> "$GITHUB_STEP_SUMMARY"
+          cat .github/run-record.json >> "$GITHUB_STEP_SUMMARY"
