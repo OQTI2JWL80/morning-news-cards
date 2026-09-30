@@ -29,6 +29,7 @@ class Gemini:
         self.confirmed = confirmed if confirmed is not None else os.getenv("GEMINI_FREE_TIER_CONFIRMED", "").lower() == "true"
         self.calls, self.max_calls, self.interval = 0, max_calls, interval
         self.last_call = 0.0
+        self.last_error = None
         self.reason = "key_missing" if not self.key else ("free_tier_unconfirmed" if not self.confirmed else None)
 
     def request(self, system, data, schema):
@@ -56,6 +57,7 @@ class Gemini:
             result = json.loads("".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []) if not p.get("thought")))
             return result if isinstance(result, dict) else None
         except FetchError as exc:
+            self.last_error = f"{exc.code}: {exc.detail}" if exc.detail else exc.code
             self.reason = {"429": "quota_exceeded", "401": "key_invalid", "403": "key_invalid", "404": "model_unavailable"}.get(exc.code, "ai_unavailable")
         except (ValueError, KeyError, TypeError, IndexError):
             self.reason = "invalid_response"
@@ -125,4 +127,3 @@ def validate_summary(bullets, body):
             return []
         texts.append(text.strip())
     return texts if len(set(texts)) == 3 else []
-

@@ -18,6 +18,11 @@ from .storage import load_previous, validate_edition, write_editions
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def edition_quality(edition):
+    # A headline-only edition must not prevent activation of verified summaries.
+    return (edition["summaryCount"], len(edition["articles"]), edition["collection"]["feedsOk"])
+
+
 def public_article(article, reason):
     status = article.get("summaryStatus", "body_unavailable")
     if status == "ready":
@@ -86,12 +91,13 @@ def main():
         selected = enrich(selected, cutoff)
         print(f"원문 확인: {sum(bool(a.get('body')) for a in selected)}개", flush=True)
         ai.summarize(selected)
+    if ai.last_error:
+        print(f"AI 응답 진단: {ai.last_error}", flush=True)
     edition = make_edition(cutoff, selected, reports, ai)
     previous = load_previous(args.archive, args.previous_url)
     old = previous.get(edition["date"])
     # A degraded rerun must not replace a more complete same-day edition.
-    score = lambda e: (len(e["articles"]), e["summaryCount"], e["collection"]["feedsOk"])
-    if old and old.get('editorialVersion') == EDITORIAL_VERSION and score(old) > score(edition):
+    if old and old.get('editorialVersion') == EDITORIAL_VERSION and edition_quality(old) > edition_quality(edition):
         edition = old
         print("같은 날짜의 기존 결과가 더 완전하여 유지합니다.", flush=True)
     previous[edition["date"]] = edition

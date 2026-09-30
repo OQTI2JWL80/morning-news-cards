@@ -1,5 +1,7 @@
 """Bounded public HTTP access. No cookies, credentials, or automatic private redirects."""
 import ipaddress
+import json
+import re
 import socket
 import time
 from urllib.error import HTTPError, URLError
@@ -10,8 +12,9 @@ USER_AGENT = "MorningNewsCards/1.0 (personal news digest; contact via repository
 
 
 class FetchError(Exception):
-    def __init__(self, code="network"):
+    def __init__(self, code="network", detail=""):
         self.code = str(code)
+        self.detail = detail
         super().__init__(self.code)
 
 
@@ -64,7 +67,19 @@ def fetch(url, *, data=None, headers=None, limit=3_000_000, retries=1, timeout=1
             if attempt < retries and exc.code in (429, 500, 502, 503, 504):
                 time.sleep(2 ** attempt)
                 continue
-            raise FetchError(exc.code) from None
+            detail = ""
+            api_key = (headers or {}).get("x-goog-api-key")
+            if api_key:
+                try:
+                    error = json.loads(exc.read(12_000)).get("error", {})
+                    message = str(error.get("message", "")).replace(api_key, "[redacted]")
+                    message = re.sub(r"AIza[\w-]+|gh[pousr]_[\w]+", "[redacted]", message)
+                    message = re.sub(r"[\x00-\x1f\x7f]", " ", message)
+                    message = re.sub(r"\d{8,}", "[redacted-id]", message)
+                    detail = message[:300]
+                except (ValueError, TypeError, AttributeError, OSError):
+                    pass
+            raise FetchError(exc.code, detail) from None
         except (URLError, TimeoutError, OSError):
             if attempt < retries:
                 time.sleep(2 ** attempt)

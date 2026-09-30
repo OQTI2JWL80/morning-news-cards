@@ -2,6 +2,8 @@ import copy
 import json
 import tempfile
 import unittest
+from io import BytesIO
+from urllib.error import HTTPError
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -10,9 +12,9 @@ from newsbrief.ai import Gemini, validate_summary
 from newsbrief.config import KST, SECTIONS
 from newsbrief.editorial import apply_classification, choose_articles, fallback_classify, same_event, trusted_candidate
 from newsbrief.feeds import edition_cutoff, parse_feed
-from newsbrief.net import FetchError, public_url
+from newsbrief.net import FetchError, fetch, public_url
 from newsbrief.storage import validate_edition, write_editions, load_previous
-from newsbrief.__main__ import make_edition, public_article
+from newsbrief.__main__ import edition_quality, make_edition, public_article
 
 CUTOFF = datetime(2026, 9, 29, 7, tzinfo=KST)
 
@@ -152,6 +154,25 @@ class SummaryTests(unittest.TestCase):
 
 
 class OutputTests(unittest.TestCase):
+    def test_verified_summaries_replace_a_headline_only_edition(self):
+        old = edition(articles=[article('a'), article('b', title='다른 기사')])
+        new = edition()
+        new['summaryCount'] = 1
+        self.assertGreater(edition_quality(new), edition_quality(old))
+        self.assertLess(edition_quality(old), edition_quality(new))
+
+    def test_api_diagnostics_redact_credentials_and_controls(self):
+        key = 'AIza' + 'secret_key_for_test' * 2
+        response = BytesIO(json.dumps({'error': {'message': 'Bad key ' + key + '\u001b[31m project 123456789012'}}).encode())
+        error = HTTPError('https://generativelanguage.googleapis.com/', 400, 'bad request', {}, response)
+        with patch('newsbrief.net.public_url', return_value=True), patch('newsbrief.net.build_opener') as opener:
+            opener.return_value.open.side_effect = error
+            with self.assertRaises(FetchError) as caught:
+                fetch('https://generativelanguage.googleapis.com/', headers={'x-goog-api-key': key}, retries=0)
+        self.assertNotIn(key, caught.exception.detail)
+        self.assertNotIn('\u001b', caught.exception.detail)
+        self.assertNotIn('123456789012', caught.exception.detail)
+
     def test_archive_outage_does_not_erase_history(self):
         with tempfile.TemporaryDirectory() as path:
             with patch('newsbrief.storage.fetch', side_effect=FetchError('503')):
