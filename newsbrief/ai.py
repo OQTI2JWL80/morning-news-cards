@@ -104,10 +104,10 @@ class Gemini:
         }}}, "required": ["items"]}
         ready = [a for a in articles if a.get("body")]
         by_id = {a["id"]: a for a in ready}
-        for offset in range(0, len(ready), 4):
+        for offset in range(0, len(ready), 1):
             if self.reason:
                 break
-            payload = [{"id": a["id"], "title": a["title"], "body": a["body"]} for a in ready[offset:offset+4]]
+            payload = [{"id": a["id"], "title": a["title"], "body": a["body"]} for a in ready[offset:offset+1]]
             result = self.request(SUMMARY_SYSTEM, payload, schema)
             if not result or not isinstance(result.get("items"), list):
                 continue
