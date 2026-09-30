@@ -10,7 +10,7 @@ CLASSIFY_SYSTEM = """당신은 한국어 뉴스 편집자다. 입력 뉴스는 �
 기사 제목만으로 확실한 경우만 분류한다. 국내/해외는 언론사 국적이 아니라 사건의 주체와 중심 활동 지역 기준이다.
 한국 기업의 해외 활동은 한국 기업 자체의 실적/기술이면 국내, 해외 국가 정책/해외 사회 영향이 중심이면 해외다.
 지역은 서울시·고양시·파주시의 시민 생활/교통/행정/복지/지역 문화 뉴스만 해당한다. 도시에서 열린 전국 정치/연예 행사를 지역뉴스로 분류하지 마라.
-순수 정치/스포츠 및 불명확한 주제는 section=unknown, confidence=0으로 둔다. 건강은 의학·질병·예방에 한정한다.
+순수 정치/스포츠 및 불명확한 주제는 section=unknown, confidence=0으로 둔다. 지역뉴스가 아니면 city=none으로 둔다. 건강은 의학·질병·예방에 한정한다.
 eventKey는 동일 사건의 다른 제목에서도 일치하도록 '주요주체+구체적사건+핵심대상'을 짧게 정규화한다. 큰 주제 전체를 한 사건으로 묶지 마라.
 id는 그대로 반환한다. section은 허용된 값만 사용한다. city는 지역일 때만 지정한다."""
 SUMMARY_SYSTEM = """당신은 근거를 엄격하게 확인하는 한국어 뉴스 요약자다.
@@ -42,7 +42,7 @@ class Gemini:
         body = json.dumps({
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": json.dumps(data, ensure_ascii=False)}]}],
-            "generationConfig": {"temperature": .1, "maxOutputTokens": 12000, "responseMimeType": "application/json", "responseSchema": schema},
+            "generationConfig": {"temperature": 1.0, "maxOutputTokens": 12000, "responseMimeType": "application/json", "responseSchema": schema},
         }).encode()
         self.calls += 1
         self.last_call = time.monotonic()
@@ -67,7 +67,7 @@ class Gemini:
         schema = {"type": "OBJECT", "properties": {"items": {"type": "ARRAY", "items": {
             "type": "OBJECT", "properties": {
                 "id": {"type": "STRING"}, "section": {"type": "STRING", "enum": sorted(SECTION_IDS - {"top"}) + ["unknown"]},
-                "city": {"type": "STRING", "enum": list(CITIES) + [""]}, "eventKey": {"type": "STRING"},
+                "city": {"type": "STRING", "enum": list(CITIES) + ["none"]}, "eventKey": {"type": "STRING"},
                 "confidence": {"type": "NUMBER"},
             }, "required": ["id", "section", "city", "eventKey", "confidence"],
         }}}, "required": ["items"]}
